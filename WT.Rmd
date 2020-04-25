@@ -1,0 +1,155 @@
+---
+title: "WhatsApp Analytics"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: TRUE
+    theme: dark
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(hrbrthemes)
+library(stopwords)
+library(tidytext)
+library(viridis)
+library(wordcloud)
+theme_set(theme_ft_rc())
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 12)
+```
+
+
+# Intro
+
+Analysis of the group, from `2018-03-27` -> `2020-04-25`
+
+```{r}
+chat <- read_csv("./data/_chat.txt")
+names(chat) <- c("DATE", "TEXT")
+
+#<U+200E> is a Left-to-right mark https://en.wikipedia.org/wiki/Left-to-right_mark. 
+# Can't remove it like you would with a string, ie, str_remove_all("<U+200E>[2018/12/11", "<U\\+200E>"), because it's actual Unicode and I don't know how to remove that :(
+
+chat <- chat %>%
+  separate(TEXT, into = c("TIME", "TEXT"), sep = 8) %>%
+  mutate(DATE = ymd(str_remove_all(DATE, "\\[")),
+         TIME = hms(TIME),
+         TEXT = str_remove_all(TEXT, "\\]")) %>%
+  separate(TEXT, into = c("NAME", "TEXT"), sep = ":") %>%
+  mutate(TEXT = str_to_lower(TEXT))
+
+```
+
+# Graphs
+
+```{r}
+counts <- chat %>%
+  count(NAME, name = "COUNT") %>%
+  arrange(desc(COUNT)) %>%
+  filter(COUNT > 1500) %>%
+  ggplot() +
+  geom_bar(mapping = aes(x = reorder(NAME, desc(COUNT)), y = COUNT), stat = "identity", alpha = 0.8) +
+  labs(subtitle = "Num of messages sent per fag since 2018-03-27",
+       x = "NAME") +
+  scale_colour_viridis() + 
+  coord_flip()
+
+counts
+
+the_boys <- chat %>%
+  count(NAME, name = "COUNT") %>%
+  arrange(desc(COUNT)) %>%
+  filter(COUNT > 1500) %>%
+  select(NAME)
+```
+
+```{r}
+chat <- chat %>%
+  mutate(DAY_OF_WEEK = factor(weekdays(DATE), 
+                                 levels = c("Saturday",
+                                            "Friday",
+                                            "Thursday",
+                                            "Wednesday",
+                                            "Tuesday",
+                                            "Monday",
+                                            "Sunday")))
+
+day_high_lvl <- chat %>% 
+  count(DAY_OF_WEEK, name = "COUNT") %>%
+  filter(!is.na(DAY_OF_WEEK)) %>%
+  ggplot() +
+  geom_bar(mapping = aes(x = DAY_OF_WEEK, y = COUNT), stat = "identity", alpha = 0.8) +
+  labs(title = "Num of messages sent by day of week",
+       subtitle = "Interestingly, we are busier during the week",
+       x = "DAY_OF_WEEK") +
+  scale_colour_viridis() + 
+  coord_flip()
+
+day_high_lvl
+
+day_high_lvl_person <- chat %>% 
+  count(DAY_OF_WEEK, NAME, name = "COUNT") %>%
+  filter(!is.na(DAY_OF_WEEK)) %>%
+  filter(NAME %in% the_boys$NAME) %>%
+  ggplot() +
+  geom_bar(mapping = aes(x = NAME, y = COUNT, fill = DAY_OF_WEEK), stat = "identity", alpha = 0.8, position = "dodge") +
+  labs(title = "Num of messages sent per person per day of week",
+       subtitle = "Interestingly, we are busier during the week",
+       x = "DAY_OF_WEEK") +
+  scale_colour_viridis() + 
+  coord_flip()
+
+day_high_lvl_person
+```
+
+
+```{r}
+words_per_oke <- chat %>%
+  select(NAME, TEXT) %>%
+  unnest_tokens(WORD, TEXT) %>%
+  filter(NAME %in% the_boys$NAME)
+
+stop_words <- rbind(stop_words,
+                    data.frame(word = c("omitted", "image", "video", "audio", "gif"), lexicon = c("FROM_WHATSAPP", "FROM_WHATSAPP", "FROM_WHATSAPP", "FROM_WHATSAPP", "FROM_WHATSAPP")))
+
+words_per_oke_count <- words_per_oke %>% 
+  anti_join(stop_words, by = c("WORD" = "word")) %>%
+  count(WORD, name = "COUNT") %>%
+  arrange(desc(COUNT)) %>%
+  head(50)
+
+g <- words_per_oke_count %>%
+  ggplot() +
+  geom_bar(mapping = aes(x = reorder(WORD, COUNT), y = COUNT), stat = "identity") + 
+  coord_flip() +
+  labs(
+    x = "WORD"
+  )
+
+g
+
+words_per_oke_count <- words_per_oke %>% 
+  anti_join(stop_words, by = c("WORD" = "word")) %>%
+  count(WORD, name = "COUNT") %>%
+  arrange(desc(COUNT)) %>%
+  head(150)
+
+wordcloud(words = words_per_oke_count$WORD, 
+          freq = words_per_oke_count$COUNT, 
+          min.freq = 1,
+          max.words=200, 
+          random.order=FALSE, 
+          rot.per=0.35,
+          colors=brewer.pal(8, "Dark2"))
+
+
+```
+
